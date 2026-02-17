@@ -14,11 +14,11 @@ def get_llm_client() -> ChatOpenAI:
     """
     Creates LLM client configured for Nebius Token Factory.
     
-    Uses Meta-Llama-3.1-70B-Instruct by default for:
-    - Strong instruction following
-    - Good JSON output formatting
-    - Large context window
-    - Cost-effective for this use case
+    Uses Qwen2.5-Coder-32B-Instruct by default for:
+    - Optimized for code understanding and analysis
+    - Excellent structured JSON output
+    - Large 128K context window
+    - Cost-effective compared to 70B models
     
     Returns:
         Configured ChatOpenAI client
@@ -31,7 +31,7 @@ def get_llm_client() -> ChatOpenAI:
         logger.error("NEBIUS_API_KEY environment variable not set")
         raise LLMConfigError("NEBIUS_API_KEY environment variable not set")
     
-    model = os.environ.get("NEBIUS_MODEL", "meta-llama/Meta-Llama-3.1-70B-Instruct")
+    model = os.environ.get("NEBIUS_MODEL", "Qwen/Qwen2.5-Coder-32B-Instruct")
     
     logger.info(f"Initializing LLM client with model: {model}")
     

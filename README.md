@@ -107,15 +107,16 @@ Health check endpoint.
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `NEBIUS_API_KEY` | Yes | - | API key for Nebius Token Factory |
-| `NEBIUS_MODEL` | No | `meta-llama/Meta-Llama-3.1-70B-Instruct` | LLM model to use |
+| `NEBIUS_MODEL` | No | `Qwen/Qwen2.5-Coder-32B-Instruct` | LLM model to use |
 | `LOG_LEVEL` | No | `INFO` | Logging level (DEBUG, INFO, WARNING, ERROR) |
 
 ## Model Choice
 
-This service uses **Meta-Llama-3.1-70B-Instruct** as the default model because:
-- Strong instruction following for structured JSON output
-- Large context window for processing repository contents
-- Good balance of quality and cost-effectiveness
+This service uses **Qwen2.5-Coder-32B-Instruct** as the default model because:
+- Optimized for code understanding and repository analysis
+- Excellent at generating structured JSON output
+- Large 128K context window for processing repository contents
+- Cost-effective compared to larger 70B models
 
 ## Repository Content Handling
 
