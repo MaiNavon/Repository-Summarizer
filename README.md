@@ -10,6 +10,74 @@ An API service that takes a GitHub repository URL and returns a human-readable s
 - Caches results for improved performance
 - Handles large repositories with smart context management
 
+## Architecture & Workflow
+
+The service uses a LangGraph-based agentic workflow with 4 nodes:
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         GitHub Repository URL                           │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│  1. FETCH REPO STRUCTURE                                                │
+│  ─────────────────────────────────────────────────────────────────────  │
+│  • Single API call to get file tree                                     │
+│  • Priority-based file selection (README → configs → entry points)      │
+│  • Parallel file fetching (5 concurrent)                                │
+│  • Entry point detection using LARCH heuristics                         │
+│  • Extract dependencies from config files (~80% token reduction)        │
+│  • Extract signatures from source files (~70% token reduction)          │
+│  • Smart README truncation (keep description, skip badges)              │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│  2. ANALYZE FILES                                                       │
+│  ─────────────────────────────────────────────────────────────────────  │
+│  • Detect languages from file extensions                                │
+│  • Detect frameworks from config file contents                          │
+│  • Detect tools (CI/CD, Docker, build tools)                            │
+│  • Analyze project structure patterns                                   │
+│  • Pre-compute info to reduce LLM workload                              │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│  3. GENERATE SUMMARY                                                    │
+│  ─────────────────────────────────────────────────────────────────────  │
+│  • Build optimized prompt with prioritized content                      │
+│  • README first (most informative)                                      │
+│  • Include pre-detected languages/frameworks/tools                      │
+│  • Call Nebius LLM (Qwen2.5-7B-Instruct)                                │
+│  • Parse JSON response                                                  │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│  4. VALIDATE RESPONSE                                                   │
+│  ─────────────────────────────────────────────────────────────────────  │
+│  • Validate required fields (summary, technologies, structure)          │
+│  • Deduplicate and sort technologies                                    │
+│  • Return final response                                                │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                              JSON Response                              │
+│  { "summary": "...", "technologies": [...], "structure": "..." }        │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Why LangGraph?
+
+While this workflow is currently linear, LangGraph provides:
+- **Clean state management** across nodes
+- **Easy extensibility** for future features (retries, branching, multi-agent)
+- **Industry-standard** agentic architecture pattern
+- **Visualization** of workflow for debugging
+
 ## Prerequisites
 
 - Python 3.10+
