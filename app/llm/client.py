@@ -14,11 +14,16 @@ def get_llm_client() -> ChatOpenAI:
     """
     Creates LLM client configured for Nebius Token Factory.
     
-    Uses Qwen2.5-Coder-32B-Instruct by default for:
-    - Optimized for code understanding and analysis
-    - Excellent structured JSON output
-    - Large 128K context window
-    - Cost-effective compared to 70B models
+    Uses Qwen2.5-7B-Instruct by default for:
+    - Excellent cost efficiency (~$0.10-0.20 per 1M tokens)
+    - Good code understanding for repo analysis
+    - Reliable structured JSON output
+    - Fast inference speed
+    - Sufficient quality for summarization tasks
+    
+    For higher quality (at higher cost), set NEBIUS_MODEL to:
+    - Qwen/Qwen2.5-Coder-32B-Instruct (better code understanding)
+    - Qwen/Qwen2.5-72B-Instruct (highest quality)
     
     Returns:
         Configured ChatOpenAI client
@@ -31,7 +36,7 @@ def get_llm_client() -> ChatOpenAI:
         logger.error("NEBIUS_API_KEY environment variable not set")
         raise LLMConfigError("NEBIUS_API_KEY environment variable not set")
     
-    model = os.environ.get("NEBIUS_MODEL", "Qwen/Qwen2.5-Coder-32B-Instruct")
+    model = os.environ.get("NEBIUS_MODEL", "Qwen/Qwen2.5-7B-Instruct")
     
     logger.info(f"Initializing LLM client with model: {model}")
     

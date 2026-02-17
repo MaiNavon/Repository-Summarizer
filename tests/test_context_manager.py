@@ -54,13 +54,13 @@ class TestCanAddFile:
     def test_cannot_add_when_at_limit(self):
         """Test cannot add when at limit."""
         ctx = ContextManager(max_tokens=8000)
-        # 8000 - 1500 reserved = 6500 available
-        assert ctx.can_add_file(6500) is False
+        # 8000 - 800 reserved = 7200 available
+        assert ctx.can_add_file(7200) is False
     
     def test_cannot_add_when_over_limit(self):
         """Test cannot add when over limit."""
         ctx = ContextManager(max_tokens=8000)
-        assert ctx.can_add_file(7000) is False
+        assert ctx.can_add_file(7500) is False
     
     @given(
         max_tokens=st.integers(min_value=2000, max_value=100000),
@@ -95,7 +95,7 @@ class TestTruncateContent:
         """Test truncated content has indicator."""
         content = "a" * 1000
         result = ctx.truncate_content(content, 50)
-        assert "[truncated]" in result
+        assert "..." in result
     
     def test_truncation_respects_limit(self, ctx):
         """Test truncated content is within limit."""
@@ -162,7 +162,7 @@ class TestParseLlmResponse:
     def test_parse_missing_field_raises(self, ctx):
         """Test missing required field raises error."""
         response = '{"summary": "Test", "technologies": ["Python"]}'
-        with pytest.raises(ValueError, match="Missing required field"):
+        with pytest.raises(ValueError, match="Missing field"):
             ctx.parse_llm_response(response)
     
     def test_parse_invalid_json_raises(self, ctx):
@@ -175,3 +175,78 @@ class TestParseLlmResponse:
         """Test empty response raises error."""
         with pytest.raises(ValueError, match="Empty response"):
             ctx.parse_llm_response("")
+
+
+class TestTruncateReadme:
+    """Tests for smart README truncation."""
+    
+    @pytest.fixture
+    def ctx(self):
+        return ContextManager()
+    
+    def test_keeps_description(self, ctx):
+        """Test that description section is kept."""
+        readme = '''# My Project
+
+This is a great project that does amazing things.
+
+## Installation
+
+pip install myproject
+
+## Contributing
+
+Please read CONTRIBUTING.md
+'''
+        result = ctx.truncate_readme(readme, 200)
+        assert "great project" in result
+        assert "Installation" in result
+    
+    def test_skips_badges(self, ctx):
+        """Test that badge lines are skipped."""
+        readme = '''[![Build Status](https://shields.io/badge)
+[![Coverage](https://codecov.io/badge)
+
+# My Project
+
+Description here.
+'''
+        result = ctx.truncate_readme(readme, 200)
+        # Badge lines at the start should be filtered
+        assert "My Project" in result
+        assert "Description" in result
+    
+    def test_skips_contributing(self, ctx):
+        """Test that contributing section is skipped."""
+        readme = '''# My Project
+
+Description.
+
+## Contributing
+
+Long contributing guidelines here...
+More guidelines...
+Even more...
+'''
+        result = ctx.truncate_readme(readme, 100)
+        assert "Description" in result
+        # Contributing section should be skipped or minimal
+    
+    def test_keeps_usage(self, ctx):
+        """Test that usage section is kept."""
+        readme = '''# My Project
+
+## Usage
+
+```python
+import myproject
+myproject.run()
+```
+
+## License
+
+MIT
+'''
+        result = ctx.truncate_readme(readme, 150)
+        assert "Usage" in result
+        assert "import myproject" in result

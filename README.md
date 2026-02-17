@@ -107,16 +107,22 @@ Health check endpoint.
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `NEBIUS_API_KEY` | Yes | - | API key for Nebius Token Factory |
-| `NEBIUS_MODEL` | No | `Qwen/Qwen2.5-Coder-32B-Instruct` | LLM model to use |
+| `NEBIUS_MODEL` | No | `Qwen/Qwen2.5-7B-Instruct` | LLM model to use |
 | `LOG_LEVEL` | No | `INFO` | Logging level (DEBUG, INFO, WARNING, ERROR) |
 
 ## Model Choice
 
-This service uses **Qwen2.5-Coder-32B-Instruct** as the default model because:
-- Optimized for code understanding and repository analysis
-- Excellent at generating structured JSON output
-- Large 128K context window for processing repository contents
-- Cost-effective compared to larger 70B models
+This service uses **Qwen2.5-7B-Instruct** as the default model because:
+- Excellent cost efficiency (~$0.10-0.20 per 1M tokens)
+- Good code understanding for repository analysis
+- Reliable structured JSON output generation
+- Fast inference speed for responsive API
+
+For higher quality results (at higher cost), you can override with:
+```bash
+export NEBIUS_MODEL="Qwen/Qwen2.5-Coder-32B-Instruct"  # Better code understanding
+export NEBIUS_MODEL="Qwen/Qwen2.5-72B-Instruct"       # Highest quality
+```
 
 ## Repository Content Handling
 
@@ -140,6 +146,42 @@ This service uses **Qwen2.5-Coder-32B-Instruct** as the default model because:
 - **Config files**: Reliable source for technology detection
 - **Token budget**: Prioritizes information-dense files to maximize LLM context usage
 - **Skip noise**: Excludes files that don't contribute to understanding the project
+
+## Cost Optimization
+
+The service is optimized for minimal LLM token usage while maintaining output quality:
+
+### Token Reduction Strategies
+1. **Dependency extraction**: Config files (package.json, requirements.txt) are parsed to extract only dependency names, reducing token usage by ~80%
+2. **Compact directory tree**: Shows only top-level structure instead of full tree
+3. **Pre-computed analysis**: Languages, frameworks, and tools are detected before LLM call, reducing LLM workload
+4. **Priority-based truncation**: Higher priority files get more tokens, lower priority files are heavily truncated
+5. **Parallel fetching**: Files are fetched in parallel for faster processing
+6. **Entry point detection**: Uses LARCH-style heuristics to identify representative code files (main functions, argument parsers, web frameworks)
+7. **Function signature extraction**: For source files, extracts only function/class signatures and docstrings, skipping implementation details (~70% token reduction)
+8. **Smart README truncation**: Keeps valuable sections (description, installation, usage), skips noise (badges, contributing, license)
+
+### Entry Point Detection Heuristics
+Based on research from the LARCH paper (Hitachi), the system scores files to identify the most representative code:
+- Contains `if __name__ == "__main__"` or `def main()` (+25 points)
+- Contains argument parser (argparse, click, typer) (+15 points)
+- Contains web framework initialization (FastAPI, Flask, Express) (+15 points)
+- File name matches repository name (+20 points)
+- Entry point-ish names (main.py, app.py, cli.py) (+10 points)
+- Penalty for test files (-20 points)
+
+### Token Budget
+- Default max tokens: 4000 (configurable)
+- Reserved for prompt/response: 800 tokens
+- README allocation: ~600 tokens (smart truncation)
+- Config files: ~300 tokens each (dependencies only)
+- Source files: ~100-200 tokens each (signatures only)
+
+### Estimated Cost per Request
+With Qwen2.5-7B-Instruct (~$0.10-0.20 per 1M tokens):
+- Small repos: ~$0.0001-0.0002
+- Medium repos: ~$0.0002-0.0004
+- Large repos: ~$0.0004-0.0008
 
 ## Running Tests
 

@@ -168,3 +168,132 @@ class TestGetPriorityFiles:
         # Verify sorted by priority
         priorities = [r[1] for r in result]
         assert priorities == sorted(priorities)
+
+
+class TestEntryPointScoring:
+    """Tests for entry point detection heuristics."""
+    
+    @pytest.fixture
+    def fetcher(self):
+        return GitHubFetcher()
+    
+    def test_main_function_scores_high(self, fetcher):
+        """Test that files with main function score higher."""
+        content = '''
+def main():
+    print("Hello")
+
+if __name__ == "__main__":
+    main()
+'''
+        score = fetcher.score_entry_point(content, "app.py", "myproject")
+        assert score >= 25  # Should get points for main pattern
+    
+    def test_argparse_scores_high(self, fetcher):
+        """Test that files with argparse score higher."""
+        content = '''
+import argparse
+
+parser = argparse.ArgumentParser()
+'''
+        score = fetcher.score_entry_point(content, "cli.py", "myproject")
+        assert score >= 15  # Should get points for argparse
+    
+    def test_fastapi_scores_high(self, fetcher):
+        """Test that files with FastAPI score higher."""
+        content = '''
+from fastapi import FastAPI
+
+app = FastAPI()
+'''
+        score = fetcher.score_entry_point(content, "main.py", "myproject")
+        assert score >= 15  # Should get points for web framework
+    
+    def test_test_file_scores_low(self, fetcher):
+        """Test that test files score lower."""
+        content = '''
+def test_something():
+    assert True
+'''
+        score = fetcher.score_entry_point(content, "test_main.py", "myproject")
+        assert score <= 10  # Should be penalized for test file
+    
+    def test_repo_name_match_scores_high(self, fetcher):
+        """Test that files matching repo name score higher."""
+        content = '''
+def main():
+    pass
+
+if __name__ == "__main__":
+    main()
+'''
+        # File with main + repo name match should score high
+        score = fetcher.score_entry_point(content, "myproject.py", "myproject")
+        assert score >= 35  # Should get points for name match + main pattern
+
+
+class TestSignatureExtraction:
+    """Tests for function signature extraction."""
+    
+    @pytest.fixture
+    def fetcher(self):
+        return GitHubFetcher()
+    
+    def test_extract_python_function(self, fetcher):
+        """Test Python function signature extraction."""
+        content = '''
+def hello(name: str) -> str:
+    """Says hello to someone."""
+    return f"Hello, {name}"
+
+def goodbye():
+    print("Bye")
+'''
+        result = fetcher.extract_signatures_and_docstrings(content, "test.py")
+        assert "def hello" in result
+        assert "def goodbye" in result
+        assert '"""Says hello' in result
+    
+    def test_extract_python_class(self, fetcher):
+        """Test Python class signature extraction."""
+        content = '''
+class MyClass:
+    """A sample class."""
+    
+    def method(self):
+        pass
+'''
+        result = fetcher.extract_signatures_and_docstrings(content, "test.py")
+        assert "class MyClass" in result
+        assert '"""A sample class' in result
+    
+    def test_extract_js_function(self, fetcher):
+        """Test JavaScript function signature extraction."""
+        content = '''
+/**
+ * Says hello
+ */
+function hello(name) {
+    return `Hello, ${name}`;
+}
+
+const goodbye = () => {
+    console.log("Bye");
+};
+'''
+        result = fetcher.extract_signatures_and_docstrings(content, "test.js")
+        assert "function hello" in result or "hello" in result
+    
+    def test_extract_go_function(self, fetcher):
+        """Test Go function signature extraction."""
+        content = '''
+package main
+
+// Hello says hello
+func Hello(name string) string {
+    return "Hello, " + name
+}
+'''
+        result = fetcher.extract_signatures_and_docstrings(content, "test.go")
+        assert "func Hello" in result
+        assert "package main" in result

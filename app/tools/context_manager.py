@@ -1,6 +1,6 @@
-"""Context management for LLM token limits."""
+"""Context management for LLM token limits - optimized for minimal token usage."""
 
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 from dataclasses import dataclass
 import json
 import logging
@@ -18,58 +18,64 @@ class FileContent:
 
 
 class ContextManager:
-    """Manages content to fit within LLM context limits."""
+    """Manages content to fit within LLM context limits with maximum efficiency."""
     
-    def __init__(self, max_tokens: int = 8000):
+    def __init__(self, max_tokens: int = 4000):
         """
         Initialize context manager.
         
         Args:
-            max_tokens: Maximum tokens for LLM context
+            max_tokens: Maximum tokens for LLM context (default 4000 for cost efficiency)
         """
         self.max_tokens = max_tokens
-        self.reserved_tokens = 1500  # Reserve for prompt template and response
+        self.reserved_tokens = 800  # Reserve for prompt template and response
     
     def estimate_tokens(self, text: str) -> int:
         """
-        Estimates token count for text (rough approximation).
+        Estimates token count for text.
         
-        Uses ~4 characters per token as a conservative estimate.
-        
-        Args:
-            text: Text to estimate
-            
-        Returns:
-            Estimated token count
+        Uses ~4 characters per token as approximation.
         """
         if not text:
             return 0
         return len(text) // 4
     
     def can_add_file(self, current_tokens: int) -> bool:
-        """
-        Checks if more content can be added.
-        
-        Args:
-            current_tokens: Current total token count
-            
-        Returns:
-            True if more content can be added
-        """
+        """Checks if more content can be added within budget."""
         return current_tokens < (self.max_tokens - self.reserved_tokens)
     
     def truncate_content(self, content: str, max_tokens: int) -> str:
-        """
-        Truncates content while preserving structure.
+        """Truncates content while preserving structure."""
+        if not content:
+            return ""
         
-        Tries to end at natural boundaries (newlines).
+        estimated = self.estimate_tokens(content)
+        if estimated <= max_tokens:
+            return content
+        
+        char_limit = max_tokens * 4
+        truncated = content[:char_limit]
+        
+        # End at natural boundary
+        last_newline = truncated.rfind("\n")
+        if last_newline > char_limit * 0.7:
+            truncated = truncated[:last_newline]
+        
+        return truncated + "\n..."
+    
+    def truncate_readme(self, content: str, max_tokens: int) -> str:
+        """
+        Smart README truncation - keeps valuable sections, skips noise.
+        
+        Keeps: Title, description, installation, usage, quick start
+        Skips: Badges, contributing, license, detailed API docs
         
         Args:
-            content: Content to truncate
-            max_tokens: Maximum tokens allowed
+            content: Full README content
+            max_tokens: Maximum tokens to use
             
         Returns:
-            Truncated content with indicator if truncated
+            Truncated README with high-value sections
         """
         if not content:
             return ""
@@ -78,17 +84,73 @@ class ContextManager:
         if estimated <= max_tokens:
             return content
         
-        # Truncate to approximate token limit
-        char_limit = max_tokens * 4
-        truncated = content[:char_limit]
+        lines = content.split("\n")
+        result_lines = []
+        current_section = "intro"
+        skip_section = False
         
-        # Try to end at a natural boundary (newline)
-        last_newline = truncated.rfind("\n")
-        if last_newline > char_limit * 0.7:  # Only if we keep at least 70%
-            truncated = truncated[:last_newline]
+        # Sections to keep (high value)
+        keep_sections = {
+            "intro", "description", "about", "overview", "what", "why",
+            "installation", "install", "setup", "getting started", "quick start",
+            "usage", "example", "examples", "how to", "basic usage",
+            "features", "highlights", "key features",
+            "requirements", "prerequisites", "dependencies",
+        }
         
-        return truncated + "\n... [truncated]"
-
+        # Sections to skip (low value for summarization)
+        skip_sections = {
+            "contributing", "contribute", "contributors", "contribution",
+            "license", "licence", "licensing",
+            "changelog", "change log", "history", "release",
+            "acknowledgments", "acknowledgements", "credits", "thanks",
+            "support", "sponsors", "funding", "donate",
+            "code of conduct", "security", "vulnerability",
+            "api reference", "api documentation", "detailed api",
+            "faq", "troubleshooting", "known issues",
+            "roadmap", "todo", "future",
+            "badge", "badges", "status",
+        }
+        
+        for line in lines:
+            stripped = line.strip().lower()
+            
+            # Skip badge lines (usually at top)
+            if stripped.startswith("[![") or stripped.startswith("![") and "badge" in stripped:
+                continue
+            if "shields.io" in stripped or "badge" in stripped and "http" in stripped:
+                continue
+            
+            # Detect section headers
+            if stripped.startswith("#"):
+                # Remove # and get section name
+                section_name = stripped.lstrip("#").strip()
+                
+                # Check if we should skip this section
+                skip_section = False
+                for skip in skip_sections:
+                    if skip in section_name:
+                        skip_section = True
+                        break
+                
+                if not skip_section:
+                    for keep in keep_sections:
+                        if keep in section_name:
+                            current_section = keep
+                            break
+            
+            # Add line if not in skip section
+            if not skip_section:
+                result_lines.append(line)
+        
+        result = "\n".join(result_lines)
+        
+        # Final truncation if still too long
+        if self.estimate_tokens(result) > max_tokens:
+            result = self.truncate_content(result, max_tokens)
+        
+        return result
+    
     def build_summary_prompt(
         self,
         repo_name: str,
@@ -100,108 +162,106 @@ class ContextManager:
         structure_analysis: str
     ) -> str:
         """
-        Builds the LLM prompt with prioritized content.
+        Builds an optimized LLM prompt with prioritized content.
         
-        Places high-priority content (README, key findings) at the beginning
-        of the prompt to leverage LLM attention patterns.
-        
-        Args:
-            repo_name: Repository name (owner/repo)
-            file_tree: List of all file paths
-            files: List of fetched file contents
-            detected_languages: Detected programming languages
-            detected_frameworks: Detected frameworks
-            detected_tools: Detected tools
-            structure_analysis: Structure description
-            
-        Returns:
-            Formatted prompt string
+        Optimization strategies:
+        1. README first (most informative)
+        2. Compact directory tree (top-level only)
+        3. Pre-detected info reduces LLM work
+        4. Minimal file content (truncated)
+        5. Clear, concise instructions
         """
-        # Sort files by priority (highest first) - README comes first
+        # Sort files by priority - README first
         sorted_files = sorted(files, key=lambda f: f.priority)
         
-        # Build file tree summary (truncated if needed)
-        tree_lines = file_tree[:100]
-        tree_summary = "\n".join(tree_lines)
-        if len(file_tree) > 100:
-            tree_summary += f"\n... and {len(file_tree) - 100} more files"
+        # Compact directory tree - only top-level and key directories
+        tree_summary = self._build_compact_tree(file_tree)
         
-        # Build file contents section with truncation
+        # Build file contents - heavily truncated
         file_contents = []
+        total_content_tokens = 0
+        max_content_tokens = self.max_tokens - self.reserved_tokens - 500  # Leave room for structure
+        
         for f in sorted_files:
-            # Truncate individual files to reasonable size
-            content = self.truncate_content(f.content, 500)
-            file_contents.append(f"### {f.path}\n```\n{content}\n```")
+            if total_content_tokens >= max_content_tokens:
+                break
+            
+            # Allocate tokens based on priority
+            max_file_tokens = {1: 600, 2: 300, 3: 200, 4: 150, 5: 100, 6: 100}.get(f.priority, 100)
+            content = self.truncate_content(f.content, max_file_tokens)
+            
+            tokens = self.estimate_tokens(content)
+            if total_content_tokens + tokens <= max_content_tokens:
+                file_contents.append(f"### {f.path}\n```\n{content}\n```")
+                total_content_tokens += tokens
         
-        # Build detected info strings
-        languages_str = ', '.join(detected_languages) if detected_languages else 'Unknown'
-        frameworks_str = ', '.join(detected_frameworks) if detected_frameworks else 'None detected'
-        tools_str = ', '.join(detected_tools) if detected_tools else 'None detected'
+        # Build detected info - already computed, saves LLM tokens
+        langs = ', '.join(detected_languages[:5]) if detected_languages else 'Unknown'
+        frameworks = ', '.join(detected_frameworks[:5]) if detected_frameworks else 'None'
+        tools = ', '.join(detected_tools[:3]) if detected_tools else 'None'
         
-        prompt = f"""Analyze this GitHub repository and provide a structured summary.
+        prompt = f"""Analyze this GitHub repository and return JSON.
 
-## Repository: {repo_name}
+## {repo_name}
 
-## Directory Structure
+## Structure
 ```
 {tree_summary}
 ```
 
-## Detected Information
-- Languages: {languages_str}
-- Frameworks: {frameworks_str}
-- Tools: {tools_str}
-- Structure: {structure_analysis}
+## Pre-detected
+- Languages: {langs}
+- Frameworks: {frameworks}
+- Tools: {tools}
+- Layout: {structure_analysis}
 
-## Key Files
+## Files
 {chr(10).join(file_contents)}
 
-## Instructions
-Based on the above information, provide a JSON response with exactly these fields:
+## Output JSON only:
+{{"summary": "**Name** does X. It provides Y.", "technologies": ["Lang", "Framework"], "structure": "Source in src/, tests in tests/."}}
 
-1. "summary": A human-readable description of what this project does (2-4 sentences). Start with the project name in bold using markdown (**ProjectName**).
-2. "technologies": An array of the main technologies, languages, and frameworks used. Include only the most important ones (typically 3-8 items).
-3. "structure": A brief description of how the project is organized (1-2 sentences).
-
-## Important Notes
-- If the README is missing or unclear, infer the project purpose from the code and config files.
-- For technologies, prioritize: main programming language, key frameworks, databases, and major tools.
-- For structure, describe the main directories and their purposes.
-
-## Example Response Format
-```json
-{{
-  "summary": "**ProjectName** is a Python library that does X. It provides Y functionality and is commonly used for Z.",
-  "technologies": ["Python", "FastAPI", "PostgreSQL"],
-  "structure": "The project follows a standard Python package layout with source code in `src/`, tests in `tests/`, and documentation in `docs/`."
-}}
-```
-
-Respond ONLY with valid JSON, no additional text before or after the JSON object."""
+Rules:
+- summary: 2-3 sentences, start with **ProjectName**
+- technologies: 3-6 most important items
+- structure: 1 sentence about layout"""
 
         return prompt
     
+    def _build_compact_tree(self, file_tree: List[str]) -> str:
+        """Builds a compact directory tree showing only structure."""
+        # Get unique top-level items and key subdirectories
+        top_level = set()
+        key_dirs = set()
+        
+        for path in file_tree:
+            parts = path.split("/")
+            if len(parts) == 1:
+                top_level.add(parts[0])
+            else:
+                top_level.add(parts[0] + "/")
+                if len(parts) >= 2 and parts[0] in ("src", "lib", "app", "pkg", "cmd"):
+                    key_dirs.add(f"  {parts[0]}/{parts[1]}/")
+        
+        # Build compact tree
+        lines = sorted(top_level)[:20]  # Limit top-level items
+        if key_dirs:
+            lines.extend(sorted(key_dirs)[:10])
+        
+        tree = "\n".join(lines)
+        if len(file_tree) > 30:
+            tree += f"\n... ({len(file_tree)} files total)"
+        
+        return tree
+    
     def parse_llm_response(self, response: str) -> Dict[str, Any]:
-        """
-        Parses and validates LLM response.
-        
-        Handles markdown code blocks and validates required fields.
-        
-        Args:
-            response: Raw LLM response string
-            
-        Returns:
-            Parsed dict with summary, technologies, structure
-            
-        Raises:
-            ValueError: If response is invalid or missing required fields
-        """
+        """Parses and validates LLM response."""
         if not response:
             raise ValueError("Empty response from LLM")
         
         response = response.strip()
         
-        # Handle markdown code blocks
+        # Extract JSON from various formats
         if "```json" in response:
             start = response.find("```json") + 7
             end = response.find("```", start)
@@ -213,7 +273,7 @@ Respond ONLY with valid JSON, no additional text before or after the JSON object
             if end > start:
                 response = response[start:end].strip()
         
-        # Try to find JSON object if there's extra text
+        # Find JSON object
         if not response.startswith("{"):
             json_start = response.find("{")
             if json_start >= 0:
@@ -224,27 +284,19 @@ Respond ONLY with valid JSON, no additional text before or after the JSON object
         try:
             result = json.loads(response)
         except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse LLM response as JSON: {e}")
-            logger.debug(f"Response was: {response[:500]}")
-            raise ValueError(f"Invalid JSON response from LLM: {e}")
+            logger.error(f"JSON parse error: {e}")
+            raise ValueError(f"Invalid JSON: {e}")
         
-        # Validate required fields
+        # Validate and normalize
         required = ["summary", "technologies", "structure"]
         for field in required:
             if field not in result:
-                raise ValueError(f"Missing required field in LLM response: {field}")
+                raise ValueError(f"Missing field: {field}")
         
-        # Ensure technologies is a list
         if not isinstance(result["technologies"], list):
-            if isinstance(result["technologies"], str):
-                result["technologies"] = [result["technologies"]]
-            else:
-                result["technologies"] = []
+            result["technologies"] = [str(result["technologies"])]
         
-        # Ensure summary and structure are strings
-        if not isinstance(result["summary"], str):
-            result["summary"] = str(result["summary"])
-        if not isinstance(result["structure"], str):
-            result["structure"] = str(result["structure"])
+        result["summary"] = str(result.get("summary", ""))
+        result["structure"] = str(result.get("structure", ""))
         
         return result
